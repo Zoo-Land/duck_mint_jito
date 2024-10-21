@@ -4,7 +4,8 @@ use std::{
     time::Instant,
     usize,
 };
-
+use tokio::time::sleep;
+use std::time::Duration;
 use colored::*;
 use drillx::{
     equix::{self},
@@ -56,18 +57,6 @@ impl Miner {
         // Open account, if needed.
         let signer = self.signer();
         self.open().await;
-
-        // Check num threads
-        self.check_num_cores(args.cores);
-
-        // Fetch boost data
-        let boost_data_1 =
-            fetch_boost_data(self.rpc_client.clone(), signer.pubkey(), &args.boost_1).await;
-        let boost_data_2 =
-            fetch_boost_data(self.rpc_client.clone(), signer.pubkey(), &args.boost_2).await;
-        let boost_data_3 =
-            fetch_boost_data(self.rpc_client.clone(), signer.pubkey(), &args.boost_3).await;
-
         // Start mining loop
         let mut last_hash_at = 0;
         let mut last_balance = 0;
@@ -91,65 +80,16 @@ impl Miner {
                     "".to_string()
                 },
             );
-
-            // Print boosts
-            log_boost_data(self.rpc_client.clone(), &boost_data_1, 1).await;
-            log_boost_data(self.rpc_client.clone(), &boost_data_2, 2).await;
-            log_boost_data(self.rpc_client.clone(), &boost_data_3, 3).await;
-            last_hash_at = proof.last_hash_at;
-            last_balance = proof.balance;
-
-            // Calculate cutoff time
-            let cutoff_time = self.get_cutoff(proof.last_hash_at, args.buffer_time).await;
-
-            // Build nonce indices
-            let mut nonce_indices = Vec::with_capacity(args.cores as usize);
-            for n in 0..(args.cores) {
-                let nonce = u64::MAX.saturating_div(args.cores).saturating_mul(n);
-                nonce_indices.push(nonce);
-            }
-
-            // Run drillx
-            let solution = Self::find_hash_par(
-                proof.challenge,
-                cutoff_time,
-                args.cores,
-                config.min_difficulty as u32,
-                nonce_indices.as_slice(),
-            )
-            .await;
-
             // Build instruction set
-            let mut ixs = vec![ore_api::sdk::auth(proof_pubkey(signer.pubkey()))];
-            let mut compute_budget = 600_000;
-
-            // Check for reset
-            if self.should_reset(config).await
-            // && rand::thread_rng().gen_range(0..100).eq(&0)
-            {
-                compute_budget += 100_000;
-                ixs.push(ore_api::sdk::reset(signer.pubkey()));
-            }
-
-            // Build option (boost) accounts
-            let mut optional_accounts: Vec<Pubkey> = vec![];
-            optional_accounts = [optional_accounts, BoostData::to_vec(&boost_data_1)].concat();
-            optional_accounts = [optional_accounts, BoostData::to_vec(&boost_data_2)].concat();
-            optional_accounts = [optional_accounts, BoostData::to_vec(&boost_data_3)].concat();
-            // Build mine ix
-            let ix = ore_api::sdk::mine(
-                signer.pubkey(),
-                signer.pubkey(),
-                self.find_bus().await,
-                solution,
-                optional_accounts,
-            );
-            ixs.push(ix);
-
+            let mut ixs = vec![
+                ore_api::sdk::auth(proof_pubkey(signer.pubkey()))
+                ];
+            let mut compute_budget = 70_000;
             // Submit transaction
             self.send_and_confirm(&ixs, ComputeBudget::Fixed(compute_budget), false)
                 .await
                 .ok();
+            sleep(Duration::from_secs(1)).await;   
         }
     }
 
