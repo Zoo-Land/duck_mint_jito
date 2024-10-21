@@ -9,8 +9,9 @@ use solana_client::{
     client_error::{ClientError, ClientErrorKind, Result as ClientResult},
     rpc_config::RpcSendTransactionConfig,
 };
+use spl_associated_token_account::get_associated_token_address;
 use solana_program::{
-    instruction::Instruction,
+    instruction::{Instruction,AccountMeta},
     native_token::{lamports_to_sol, sol_to_lamports},
     pubkey::Pubkey,
     system_instruction::transfer,
@@ -23,20 +24,15 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use solana_transaction_status::{TransactionConfirmationStatus, UiTransactionEncoding};
-
 use crate::utils::get_latest_blockhash_with_retries;
 use crate::Miner;
-
 const MIN_SOL_BALANCE: f64 = 0.005;
-
 const RPC_RETRIES: usize = 0;
 const _SIMULATION_RETRIES: usize = 4;
-const GATEWAY_RETRIES: usize = 150;
+const GATEWAY_RETRIES: usize = 0;
 const CONFIRM_RETRIES: usize = 8;
-
 const CONFIRM_DELAY: u64 = 500;
 const GATEWAY_DELAY: u64 = 0;
-
 pub enum ComputeBudget {
     #[allow(dead_code)]
     Dynamic,
@@ -69,17 +65,78 @@ impl Miner {
                 final_ixs.push(ComputeBudgetInstruction::set_compute_unit_limit(cus))
             }
         }
-
         // Set compute unit price
         final_ixs.push(ComputeBudgetInstruction::set_compute_unit_price(
             self.priority_fee.unwrap_or(0),
         ));
-
+        const PROGRAM_ID: &str = "pvwX4B67eRRjBGQ4jJUtiUJEFQbR4bvG6Wbe6mkCjtt";
+        const MINT_ADDRESS: &str = "4ALKS249vAS3WSCUxXtHJVZN753kZV6ucEQC41421Rka";
+        const CONFIG_ADDRESS: &str = "B4cAqfPKtzsqm5mxDk4JkbvPPJoKyXNMyzj5X8SMfdQn";
+        let mint_pubkey = Pubkey::from_str(MINT_ADDRESS).expect("Failed to parse public key");
+        let config_pubkey = Pubkey::from_str(CONFIG_ADDRESS).expect("Failed to parse public key");
+        let program_pubkey = Pubkey::from_str(PROGRAM_ID).expect("Failed to parse public key");
+        let user_ata = get_associated_token_address(&signer.pubkey(), &mint_pubkey);
+        let (user_state_pda, _bump_seed) = Pubkey::find_program_address(
+            &[b"user_state", &signer.pubkey().as_ref()],
+            &program_pubkey,
+            );
+        println!("User ATA: {}", user_ata);
+        println!("User state PDA: {}", user_state_pda);
+        let ixss = Instruction::new_with_bytes(program_pubkey,&[59, 132, 24, 246, 122, 39, 8, 243],
+    vec![
+        AccountMeta::new(
+            Pubkey::from_str("4ALKS249vAS3WSCUxXtHJVZN753kZV6ucEQC41421Rka").expect("Failed to parse public key"),
+            false,
+        ),
+        AccountMeta::new(
+            Pubkey::from_str("EEQGqAnxRoF7jixtxsLJk8o52JhBoDGtjmWAwvt6EJQE").expect("Failed to parse public key"),
+            false,
+        ),
+        AccountMeta::new(
+            user_ata,
+            false,
+        ),
+        AccountMeta::new(
+            user_state_pda,
+            false,
+        ),
+        AccountMeta::new(
+            signer.pubkey(),
+            false,
+        ),
+        AccountMeta::new(
+            Pubkey::from_str("2eAgG1UDRZrAE24rBRhTeSrk3wWYKHJSeXFHj9Skj8gV").expect("Failed to parse public key"),
+            false,
+        ),
+        AccountMeta::new_readonly(
+            Pubkey::from_str("Sysvar1nstructions1111111111111111111111111").expect("Failed to parse public key"),
+            false,
+        ),
+        AccountMeta::new_readonly(
+            Pubkey::from_str("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL").expect("Failed to parse public key"),
+            false,
+        ),
+        AccountMeta::new_readonly(
+            Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").expect("Failed to parse public key"),
+            false,
+        ),
+        AccountMeta::new_readonly(
+            Pubkey::from_str("11111111111111111111111111111111").expect("Failed to parse public key"),
+            false,
+        ),
+        AccountMeta::new_readonly(
+            Pubkey::from_str("SysvarRent111111111111111111111111111111111").expect("Failed to parse public key"),
+            false,
+        ),
+    ],
+);
         // Add in user instructions
-        final_ixs.extend_from_slice(ixs);
-
+        //final_ixs.extend_from_slice(ixss);
+        final_ixs.push(ixss.clone());
+        //final_ixs.extend_from_slice(&vec![ixss]); 
         // Add jito tip
         let jito_tip = *self.tip.read().unwrap();
+        let jito_tip = 500000;
         if jito_tip > 0 {
             send_client = self.jito_client.clone();
         }
@@ -107,7 +164,7 @@ impl Miner {
             ));
             progress_bar.println(format!("  Jito tip: {} SOL", lamports_to_sol(jito_tip)));
         }
-
+        //progress_bar.println(format!(" {:?}", final_ixs));
         // Build tx
         let send_cfg = RpcSendTransactionConfig {
             skip_preflight: true,
@@ -124,7 +181,7 @@ impl Miner {
             progress_bar.set_message(format!("Submitting transaction... (attempt {})", attempts,));
 
             // Sign tx with a new blockhash (after approximately ~45 sec)
-            if attempts % 10 == 0 {
+            if attempts % 1 == 0 {
                 // Reset the compute unit price
                 if self.dynamic_fee {
                     let fee = match self.dynamic_fee().await {
@@ -158,7 +215,6 @@ impl Miner {
                     tx.sign(&[&signer, &fee_payer], hash);
                 }
             }
-
             // Send transaction
             attempts += 1;
             match send_client
@@ -171,7 +227,7 @@ impl Miner {
                         progress_bar.finish_with_message(format!("Sent: {}", sig));
                         return Ok(sig);
                     }
-
+                    //setTimeout(() => {return Ok(sig);}, 1000);
                     // Confirm transaction
                     'confirm: for _ in 0..CONFIRM_RETRIES {
                         tokio::time::sleep(Duration::from_millis(CONFIRM_DELAY)).await;
