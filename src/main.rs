@@ -180,7 +180,7 @@ async fn main() {
     let fee_payer_filepath = args.fee_payer.unwrap_or(default_keypair.clone());
     let rpc_client = RpcClient::new_with_commitment(cluster, CommitmentConfig::confirmed());
     let jito_client =
-        RpcClient::new("https://mainnet.block-engine.jito.wtf/api/v1/transactions".to_string());
+        RpcClient::new("https://frankfurt.mainnet.block-engine.jito.wtf/api/v1/transactions".to_string());
 
     let tip = Arc::new(RwLock::new(0_u64));
     let tip_clone = Arc::clone(&tip);
